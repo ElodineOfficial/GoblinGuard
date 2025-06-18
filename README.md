@@ -4,7 +4,7 @@ A lightweight Chrome extension that **automatically mutes sponsored ads on YouTu
 
 ---
 
-### ❓ What It Does
+###  What It Does
 
 - Detects when YouTube is playing a **video ad**  
 - **Mutes audio** and **blacks out the player** during that time  
@@ -14,27 +14,27 @@ This isn’t about skipping — it’s about letting the ad run while *you* step
 
 ---
 
-### ⚙️ How It Works
+###  How It Works
 
 This extension watches for the subtle “Sponsored” badge YouTube uses to mark ad segments.  
 When it appears, we **mute the video and cover it visually** — just like you'd do manually if you saw an ad start.
 
 ---
 
-### 🎯 What It Was *Meant* To Do
+###  What It Was *Meant* To Do
 
 Originally, this was built to **quiet sudden volume spikes** during mid-roll ads SO I COULD FUCKING SLEEP WITHOUT WAKING UP TO AN AUDIO JUMPSCARE.  
 That’s it — not block, not skip, not hack.
 
 ---
 
-### 🧨 Why It Doesn’t *Just* Mute Anymore
+###  Why It Doesn’t *Just* Mute Anymore
 
 Turns out, YouTube doesn’t like when ads are muted — it will instead **refuses to serve the ad entirely** if audio can’t be auto-played.  
 
 ---
 
-### 🛡️ Stability & Privacy
+###  Stability & Privacy
 
 - We’ve built in **fail-safes and countermeasures** to keep it working even as YouTube evolves, but this is just prolonging the eventual catches installed for this.
 - No analytics, no tracking, **no data collected or transmitted.**
@@ -42,7 +42,7 @@ Turns out, YouTube doesn’t like when ads are muted — it will instead **refus
 
 ---
 
-### 🧩 How To Install
+###  How To Install
 
 1. Download or clone this repo into a folder (3 files total):
    - `manifest.json`
@@ -57,13 +57,13 @@ That’s it — it runs silently in the background on any YouTube video.
 
 ---
 
-### 💡 Tip
+###  Tip
 
 Want to see what it’s doing?  
 Open DevTools → Console and turn on logging by setting `DEBUG = true` in `content.js`. You'll be able to see when ads are silenced.
 
 ---
 
-### 🔒 License
+###  License
 
 MIT — free to use, fork, adapt, or forget about.
