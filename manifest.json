@@ -1,0 +1,20 @@
+{
+  "name": "Goblin Guard Alpha",
+  "description": "You know what this does, goober, let's not give anyone free help in fixing this <3.",
+  "version": "1.0.3",
+  "manifest_version": 3,
+
+
+  "action": {
+    "default_icon": "icon.png"
+  },
+
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
