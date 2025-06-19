@@ -1,6 +1,6 @@
 # GOBLIN GUARD ALPHA
 
-A lightweight Chrome extension that **automatically mutes sponsored ads on YouTube videos**.
+A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos**. GoblinGuard does not currently work for shorts.
 
 ---
 
