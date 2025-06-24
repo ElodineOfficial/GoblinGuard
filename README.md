@@ -1,7 +1,7 @@
 # GOBLIN GUARD ALPHA
 
 A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos**. 
-To do: Apply to shorts, auto-skip when YT attempts to serve ad, include surveys which work differently. I'll have this all finished before the end of June/25
+To do: Apply to shorts, auto-skip when YT attempts to serve ad. I'll have this all finished before the end of June/30
 
 ---
 
