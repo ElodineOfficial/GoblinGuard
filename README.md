@@ -1,7 +1,7 @@
 # GOBLIN GUARD ALPHA
 
-A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos**. 
-To do: Apply to shorts, auto-skip when YT attempts to serve ad. I'll have this all finished before the end of June/30
+A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos and YT shorts**. 
+To do: Auto-skip when ads are played via YT music, browser compatibility [brave+others]
 
 ---
 
@@ -10,6 +10,7 @@ To do: Apply to shorts, auto-skip when YT attempts to serve ad. I'll have this a
 - Detects when YouTube is playing a **video ad**  
 - **Mutes audio** and **blacks out the player** during that time  
 - Restores sound and video automatically when normal content resumes  
+- Automatically scrolls past ads in shorts after allowing them to load to keep YT from throwing a tantrum
 
 This isn’t about skipping — it’s about letting the ad run while *you* step away or tune out.
 
