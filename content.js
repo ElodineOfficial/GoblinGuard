@@ -14,13 +14,13 @@
   const SPA_POLL_MS = 400;
 
   /**  Minimum ms between two automatic skips of sponsored reels. */
-  const SKIP_COOLDOWN_MS = 10_000;
+  const SKIP_COOLDOWN_MS = 5_000;
 
   /**  Base delay (ms) before clicking “Next Short”. */
-  const SKIP_DELAY_BASE_MS = 200;
+  const SKIP_DELAY_BASE_MS = 100;
 
   /**  Additional random delay (0-this) after the base delay (ms). */
-  const SKIP_DELAY_VARIANCE_MS = 800;
+  const SKIP_DELAY_VARIANCE_MS = 400;
 
   /* ------------------------------------------------------------------ */
   /*  Utility helpers                                                   */
@@ -212,6 +212,8 @@
   /* ------------------------------------------------------------------ */
 
   const longForm = {
+	    TIMEOUT_MS: 5_000,   // ← maximum time overlay may stay visible
+  _overlayShownAt: 0,   // ← timestamp when we first displayed it
     /**  CSS that indicates a long–form ad is in progress. */
     AD_SELECTORS: [
       '.html5-video-player.ad-showing',
@@ -257,31 +259,39 @@
       return !!document.querySelector(this.AD_SELECTORS);
     },
 
-    /**  Mute/unmute logic with overlay. */
-    tick() {
-      const video = document.querySelector('video');
-      if (!video) return;
+    /**  Mute/unmute/refresh logic with overlay. */
+  tick() {
+    const video   = document.querySelector('video');
+    if (!video) return;
 
-      const overlay = this.getOverlay();
-      const inAd = this.adIsActive();
+    const overlay = this.getOverlay();
+    const inAd    = this.adIsActive();
 
-      if (inAd && !this._muted) {
-        video.muted = true;
-        this._muted = true;
-        overlay.style.display = 'block';
-        log('🔇  Muted long-form ad');
-      } else if (!inAd && this._muted) {
-        video.muted = false;
-        this._muted = false;
-        overlay.style.display = 'none';
-        log('🔊  Unmuted');
-      }
-    },
+    if (inAd && !this._muted) {
+      video.muted         = true;
+      this._muted         = true;
+      overlay.style.display = 'block';
+      this._overlayShownAt = Date.now();       // start timer
+      log('🔇  Muted long‑form ad');
+    } else if (!inAd && this._muted) {
+      video.muted         = false;
+      this._muted         = false;
+      overlay.style.display = 'none';
+      this._overlayShownAt = 0;                // reset timer
+      log('🔊  Unmuted');
+    }
 
-    _overlay: null,
-    _muted: false
-  };
+    /* 🚨  Refresh if overlay stuck too long */
+    if (this._overlayShownAt &&
+        Date.now() - this._overlayShownAt > this.TIMEOUT_MS) {
+      log('🔄  Overlay stuck >30 s – reloading page');
+      location.reload();
+    }
+  },
 
+  _overlay: null,
+  _muted: false
+};
   /* ------------------------------------------------------------------ */
   /*  MutationObserver + SPA navigation guard                           */
   /* ------------------------------------------------------------------ */
