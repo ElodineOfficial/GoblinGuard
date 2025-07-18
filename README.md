@@ -13,7 +13,7 @@ To do: Browser compatibility [brave+others]
 - Automatically scrolls past ads in shorts after allowing them to load to keep YT from throwing a tantrum
 - If mute and blind ad is served regardless of Goblin Guard, Goblin Guard now refreshes the page leaving you right back where you were, no wait necescarry
 
-This isn’t about skipping — it’s about letting the ad run while *you* step away or tune out.
+This isn’t about blocking ads — it’s about letting the ad run while *you* step away or tune out.
 
 ---
 
