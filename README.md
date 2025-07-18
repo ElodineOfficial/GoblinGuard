@@ -1,7 +1,7 @@
 # GOBLIN GUARD ALPHA
 
 A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos and YT shorts**. 
-To do: Auto-skip when ads are played via YT music, browser compatibility [brave+others]
+To do: Browser compatibility [brave+others]
 
 ---
 
@@ -11,6 +11,7 @@ To do: Auto-skip when ads are played via YT music, browser compatibility [brave+
 - **Mutes audio** and **blacks out the player** during that time  
 - Restores sound and video automatically when normal content resumes  
 - Automatically scrolls past ads in shorts after allowing them to load to keep YT from throwing a tantrum
+- If mute and blind ad is served regardless of Goblin Guard, Goblin Guard now refreshes the page leaving you right back where you were, no wait necescarry
 
 This isn’t about skipping — it’s about letting the ad run while *you* step away or tune out.
 
