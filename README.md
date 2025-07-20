@@ -1,7 +1,7 @@
 # GOBLIN GUARD ALPHA
 
 A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos and YT shorts**. 
-To do: Browser compatibility [brave+others]
+To do: Browser compatibility [brave+others], fix bug where an ad being dismissed somehow reroutes the video back 10 seconds [likely a YT side issue but an easy one to curb], fix an issue where ads show up on music playlists [1/1000 chance currently] it looks like there's a different mechanisim here I need to smooth out. 
 
 ---
 
