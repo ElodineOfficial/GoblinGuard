@@ -1,25 +1,27 @@
 /* ==================================================================== */
-/*  Sponsor-Skip for YouTube Shorts – desktop Chrome (2025-07-06)       */
+/*  Sponsor-Skip for YouTube Shorts – desktop Chrome                     */
+/*  + Live/Watch mute + timed "Skip Ad" window                           */
+/*  Updated: 2025-08-24                                                  */
 /* ==================================================================== */
 
 (() => {
   /* ------------------------------------------------------------------ */
-  /*  Configuration (adjust if you like)                                */
+  /*  Configuration                                                      */
   /* ------------------------------------------------------------------ */
 
-  /**  Set to false to silence console output. */
+  /** Set to false to silence console output. */
   const DEBUG_LOG = true;
 
-  /**  How often we poll the DOM for URL changes (ms). */
+  /** How often we poll the DOM for URL changes (ms). */
   const SPA_POLL_MS = 400;
 
-  /**  Minimum ms between two automatic skips of sponsored reels. */
+  /** Minimum ms between two automatic skips of sponsored reels. */
   const SKIP_COOLDOWN_MS = 5_000;
 
-  /**  Base delay (ms) before clicking “Next Short”. */
+  /** Base delay (ms) before clicking “Next Short”. */
   const SKIP_DELAY_BASE_MS = 100;
 
-  /**  Additional random delay (0-this) after the base delay (ms). */
+  /** Additional random delay (0-this) after the base delay (ms). */
   const SKIP_DELAY_VARIANCE_MS = 400;
 
   /* ------------------------------------------------------------------ */
@@ -29,23 +31,38 @@
   const log = (...args) => {
     if (!DEBUG_LOG) return;
     const ts = new Date().toLocaleTimeString();
-    console.log(`%c[Shorts-Sponsor-Skip ${ts}]`, 'color:#9cf', ...args);
+    console.log(`%c[YT-Muter ${ts}]`, 'color:#9cf', ...args);
   };
 
-  /**  Return a random integer in [0, n). */
+  /** Random integer in [0, n). */
   const randInt = (n) => Math.floor(Math.random() * n);
 
+  /** Random delay for Shorts skip. */
   const randDelay = () => SKIP_DELAY_BASE_MS + randInt(SKIP_DELAY_VARIANCE_MS);
 
+  /**
+   * Dispatch a full “pointerdown → mousedown → mouseup → click” sequence.
+   * (event.isTrusted will be false, but this is accepted for many YT UI bits.)
+   */
+  const trustedClick = (el) => {
+    if (!el) return false;
+    ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach((type) =>
+      el.dispatchEvent(
+        new MouseEvent(type, {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          button: 0
+        })
+      )
+    );
+    return true;
+  };
+
   /* ------------------------------------------------------------------ */
-  /*  Current visible reel helper                                       */
+  /*  Shorts: current visible reel helper                                */
   /* ------------------------------------------------------------------ */
 
-  /**
-   * Return the `<ytd-reel-video-renderer>` whose bounding rectangle
-   * occupies the largest *visible* height in the viewport. This is
-   * the reel YouTube currently treats as “active”.
-   */
   const getVisibleReel = () => {
     let best = null;
     let bestVisibleHeight = 0;
@@ -66,73 +83,30 @@
   };
 
   /* ------------------------------------------------------------------ */
-  /*  Sponsor badge detection (within the *visible* reel only)          */
+  /*  Shorts: sponsor badge detection                                    */
   /* ------------------------------------------------------------------ */
 
-  /**
-   * CSS selectors that positively identify a Shorts advertisement.
-   * (Your two exact DOM paths are condensed into these three selectors.)
-   */
   const SPONSOR_BADGE_SELECTORS = [
-    /* New 2025 “badge-shape” path. */
-    'reels-ad-card-buttoned-view-model badge-shape > div',
-
-    /* <ytd-ad-slot-renderer> still appears on most layouts. */
-    'ytd-ad-slot-renderer',
-
-    /* Older “Sponsored” aria-label fallback. */
-    '[aria-label="Sponsored"]'
+    'reels-ad-card-buttoned-view-model badge-shape > div', // 2025+ badge path
+    'ytd-ad-slot-renderer',                                // common renderer
+    '[aria-label="Sponsored"]'                             // legacy aria fallback
   ].join(',');
 
-  /**
-   * True ⇢ the reel that is ≥50 % on-screen contains a sponsor badge.
-   */
   const isSponsoredReelVisible = () => {
     const reel = getVisibleReel();
     return !!(reel && reel.querySelector(SPONSOR_BADGE_SELECTORS));
   };
 
   /* ------------------------------------------------------------------ */
-  /*  Navigation to the next Short                                      */
+  /*  Shorts: navigation helpers                                         */
   /* ------------------------------------------------------------------ */
 
-  /**
-   * Grab *the real clickable* button nested inside
-   *   #navigation-button-down → ytd-button-renderer → … → <button>
-   * on the Shorts player UI.
-   */
   const queryNavDownButton = () =>
     document.querySelector(
       '#navigation-button-down ytd-button-renderer button,' +
         '#navigation-button-down button'
     );
 
-  /**
-   * Dispatch a full “pointerdown → mousedown → mouseup → click”
-   * sequence on the element (`event.isTrusted` is still false, but
-   * YouTube accepts this for its own navigation buttons).
-   *
-   * @returns {boolean}  true if a click was dispatched.
-   */
-  const trustedClick = (el) => {
-    if (!el) return false;
-    ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach((type) =>
-      el.dispatchEvent(
-        new MouseEvent(type, {
-          view: window,
-          bubbles: true,
-          cancelable: true,
-          button: 0
-        })
-      )
-    );
-    return true;
-  };
-
-  /**
-   * Fallback when the dedicated “Down” button isn’t in the DOM
-   * (rare A/B layouts): scroll the next reel into view.
-   */
   const scrollNextReelIntoView = () => {
     const current = getVisibleReel();
     if (current && current.nextElementSibling) {
@@ -141,15 +115,10 @@
         block: 'start'
       });
     } else {
-      /* As a last resort, just scroll one viewport height. */
       window.scrollBy({ top: innerHeight, left: 0, behavior: 'instant' });
     }
   };
 
-  /**
-   * Perform the actual navigation: prefer clicking YouTube’s own
-   * button; otherwise scroll.
-   */
   const goToNextShort = () => {
     const button = queryNavDownButton();
     if (!trustedClick(button)) {
@@ -159,17 +128,11 @@
   };
 
   /* ------------------------------------------------------------------ */
-  /*  Sponsor-skip orchestration                                        */
+  /*  Shorts: sponsor-skip orchestration                                 */
   /* ------------------------------------------------------------------ */
 
   const skipState = { lastSkipTime: 0 };
 
-  /**
-   * Called frequently (via MutationObserver). If we’re on a
-   * `/shorts/...` page and the visible reel is an ad, schedule a
-   * single skip (respecting the cooldown). The IntersectionObserver
-   * verifies a different reel becomes dominant before we log success.
-   */
   const maybeSkipSponsoredReel = () => {
     if (!location.pathname.startsWith('/shorts')) return;
     if (!isSponsoredReelVisible()) return;
@@ -185,7 +148,6 @@
       const startingReel = getVisibleReel();
       if (!startingReel) return;
 
-      /* Watch for any *other* reel to become ≥50 % visible. */
       const watch = new IntersectionObserver(
         (entries, obs) => {
           const differentReelVisible = entries.some(
@@ -208,23 +170,29 @@
   };
 
   /* ------------------------------------------------------------------ */
-  /*  Long-form /watch mute-overlay (untouched from earlier)            */
+  /*  Long-form (/watch + lives): mute + timed Skip Ad                   */
   /* ------------------------------------------------------------------ */
 
   const longForm = {
-	    TIMEOUT_MS: 5_000,   // ← maximum time overlay may stay visible
-  _overlayShownAt: 0,   // ← timestamp when we first displayed it
-    /**  CSS that indicates a long–form ad is in progress. */
+    /** Maximum time overlay may stay visible before we force reload. */
+    TIMEOUT_MS: 10_000,
+
+    /** Randomized “click Skip Ad” window relative to ad start. */
+    SKIP_MIN_MS: 5_100,
+    SKIP_MAX_MS: 8_000,
+
+    /** CSS indicating an ad is in progress or UI is showing ad affordances. */
     AD_SELECTORS: [
       '.html5-video-player.ad-showing',
       '.html5-video-player.ad-interrupting',
       '.ytp-ad-skip-button',
+      '.ytp-ad-skip-button-modern',
       '.ytp-ad-timed-pie-countdown-container',
       '.ad-simple-attributed-string.ytp-ad-badge__text--clean-player',
       '[aria-label="Survey"]'
     ].join(','),
 
-    /**  One-time <img> overlay shown while muted. */
+    /** One-time <img> overlay while muted. */
     getOverlay() {
       if (this._overlay) return this._overlay;
 
@@ -246,83 +214,154 @@
       return this._overlay;
     },
 
-    /**  True ⇢ a long-form ad is showing on a /watch page. */
+    /** True ⇢ a long-form ad is showing on a watch/live page. */
     adIsActive() {
       const player = document.querySelector('.html5-video-player');
       if (
         player &&
         (player.classList.contains('ad-showing') ||
           player.classList.contains('ad-interrupting'))
-      )
+      ) {
         return true;
-
+      }
       return !!document.querySelector(this.AD_SELECTORS);
     },
 
-    /**  Mute/unmute/refresh logic with overlay. */
-  tick() {
-    const video   = document.querySelector('video');
-    if (!video) return;
+    /** Find a visible Skip Ad button (skippable ads only). */
+    querySkipButton() {
+      const btn =
+        document.querySelector(
+          '.ytp-ad-skip-button.ytp-button, .ytp-ad-skip-button-modern.ytp-button, .ytp-ad-skip-button-container button'
+        ) ||
+        document.querySelector('[class*="ytp-ad-skip-button"] button');
 
-    const overlay = this.getOverlay();
-    const inAd    = this.adIsActive();
+      if (!btn) return null;
 
-    if (inAd && !this._muted) {
-      video.muted         = true;
-      this._muted         = true;
-      overlay.style.display = 'block';
-      this._overlayShownAt = Date.now();       // start timer
-      log('🔇  Muted long‑form ad');
-    } else if (!inAd && this._muted) {
-      video.muted         = false;
-      this._muted         = false;
-      overlay.style.display = 'none';
-      this._overlayShownAt = 0;                // reset timer
-      log('🔊  Unmuted');
-    }
+      const cs = getComputedStyle(btn);
+      const visible =
+        cs.display !== 'none' &&
+        cs.visibility !== 'hidden' &&
+        cs.pointerEvents !== 'none' &&
+        btn.offsetParent !== null &&
+        !btn.disabled &&
+        btn.getBoundingClientRect().width > 0;
 
-    /* 🚨  Refresh if overlay stuck too long */
-    if (this._overlayShownAt &&
-        Date.now() - this._overlayShownAt > this.TIMEOUT_MS) {
-      log('🔄  Overlay stuck >30 s – reloading page');
-      location.reload();
-    }
-  },
+      return visible ? btn : null;
+    },
 
-  _overlay: null,
-  _muted: false
-};
+    /** Start watching for a Skip Ad button during the 5–10 s window. */
+    startSkipWindow() {
+      this.stopSkipWindow(); // clear any prior watchers
+
+      const windowStart = this._adStartedAt + this.SKIP_MIN_MS;
+      const windowEnd = this._adStartedAt + this.SKIP_MAX_MS;
+      const startDelay = Math.max(0, windowStart - Date.now());
+
+      this._skipTimer = setTimeout(() => {
+        // Poll every 200 ms until the end of the window or we click once.
+        this._skipPoll = setInterval(() => {
+          const now = Date.now();
+          if (now > windowEnd) {
+            this.stopSkipWindow();
+            return;
+          }
+          const btn = this.querySkipButton();
+          if (btn) {
+            if (trustedClick(btn)) {
+              log('⏭️  Clicked “Skip Ad” (within 5–10 s window)');
+            } else {
+              // Fallback to direct .click() if dispatching events didn't take.
+              try { btn.click(); log('⏭️  Clicked “Skip Ad” via .click()'); } catch {}
+            }
+            this.stopSkipWindow();
+          }
+        }, 200);
+      }, startDelay);
+    },
+
+    stopSkipWindow() {
+      if (this._skipTimer) {
+        clearTimeout(this._skipTimer);
+        this._skipTimer = 0;
+      }
+      if (this._skipPoll) {
+        clearInterval(this._skipPoll);
+        this._skipPoll = 0;
+      }
+    },
+
+    /** Mute/unmute + overlay + skip-window orchestration. */
+    tick() {
+      const video = document.querySelector('video');
+      if (!video) return;
+
+      const overlay = this.getOverlay();
+      const inAd = this.adIsActive();
+
+      if (inAd && !this._muted) {
+        video.muted = true;
+        this._muted = true;
+        overlay.style.display = 'block';
+        this._overlayShownAt = Date.now();
+        this._adStartedAt = this._overlayShownAt;
+        this.startSkipWindow();
+        log('🔇  Muted ad (watch/live); started Skip-Ad window');
+      } else if (!inAd && this._muted) {
+        video.muted = false;
+        this._muted = false;
+        overlay.style.display = 'none';
+        this._overlayShownAt = 0;
+        this._adStartedAt = 0;
+        this.stopSkipWindow();
+        log('🔊  Unmuted');
+      }
+
+      // Refresh if overlay stuck too long (failsafe for non-skippables).
+      if (
+        this._overlayShownAt &&
+        Date.now() - this._overlayShownAt > this.TIMEOUT_MS
+      ) {
+        log('🔄  Overlay stuck >30 s – reloading page');
+        location.reload();
+      }
+    },
+
+    // internals
+    _overlay: null,
+    _muted: false,
+    _overlayShownAt: 0,
+    _adStartedAt: 0,
+    _skipTimer: 0,
+    _skipPoll: 0
+  };
+
   /* ------------------------------------------------------------------ */
-  /*  MutationObserver + SPA navigation guard                           */
+  /*  MutationObserver + SPA navigation guard                            */
   /* ------------------------------------------------------------------ */
 
-  const PAGE_SELECTOR = 'ytd-app'; // entire doc subtree
-
-  /**  Observe all subtree changes so we notice new reels/badges fast. */
+  const PAGE_SELECTOR = 'ytd-app';
   const OBSERVER_CONFIG = { childList: true, subtree: true, attributes: true };
-
   let domObserver = null;
 
-  /**  Runs on every DOM mutation we care about. */
   const onDomMutate = () => {
     maybeSkipSponsoredReel();
-
-    /* Only run mute/unmute on /watch pages (never on /shorts). */
+    // Run mute/unmute and skip-window logic on anything that's not Shorts.
     if (!location.pathname.startsWith('/shorts')) {
       longForm.tick();
     }
   };
 
-  /**  Attach the MutationObserver if not already active. */
   const bindObserver = () => {
     if (domObserver) return;
     domObserver = new MutationObserver(onDomMutate);
-    domObserver.observe(document.querySelector(PAGE_SELECTOR) || document.body, OBSERVER_CONFIG);
+    domObserver.observe(
+      document.querySelector(PAGE_SELECTOR) || document.body,
+      OBSERVER_CONFIG
+    );
     onDomMutate();
     log('🔎  DOM observer bound');
   };
 
-  /**  Disconnect the MutationObserver. */
   const unbindObserver = () => {
     if (domObserver) {
       domObserver.disconnect();
@@ -331,10 +370,16 @@
     }
   };
 
-  /**
-   * We must re-bind when the SPA (YouTube’s polymer router) changes
-   * the URL, because entire shadow-roots can be swapped.
-   */
+  /** Routes that actually host a YouTube HTML5 player we care about. */
+  const shouldBindForPath = (p) => {
+    if (p.startsWith('/watch') || p.startsWith('/watch_videos')) return true; // includes playlists & mixes
+    if (p.startsWith('/shorts')) return true;
+    if (p.startsWith('/live')) return true; // /live/VIDEO_ID
+    if (/^\/(@|channel\/)[^/]+\/live\b/.test(p)) return true; // /@handle/live or /channel/.../live
+    if (p.startsWith('/playlist')) return true; // playlist landing can embed a player
+    return false;
+  };
+
   let currentURL = location.href;
 
   const onURLChange = () => {
@@ -342,26 +387,12 @@
     currentURL = location.href;
     log('🔄  URL change:', currentURL);
 
-    if (
-      location.pathname.startsWith('/shorts') ||
-      location.pathname.startsWith('/watch')
-    ) {
-      bindObserver();
-    } else {
-      unbindObserver();
-    }
+    if (shouldBindForPath(location.pathname)) bindObserver();
+    else unbindObserver();
   };
-
-  /* ------------------------------------------------------------------ */
-  /*  Wire-up: listen for SPA events + fallback polling                 */
-  /* ------------------------------------------------------------------ */
 
   /* YouTube fires a custom event when navigation is finished. */
   window.addEventListener('yt-navigate-finish', onURLChange);
-
-  /* Also poll every SPA_POLL_MS in case that event is missed. */
   setInterval(onURLChange, SPA_POLL_MS);
-
-  /* Kick-start on initial load. */
   onURLChange();
 })();
