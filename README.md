@@ -1,3 +1,5 @@
+11/8 Update: This tool is currently busted. Why? YT changed how ads are served, and as a result GG doesn't properly function at this time. I'm still updating this tool, but it's going to take me a second to get things working again as YT is making continued updates to combat similar but far larger extensions. Thanks for bearing with me <3
+
 # GOBLIN GUARD ALPHA
 
 A lightweight Chrome extension that **accidently unalives sponsored ads on YouTube videos and YT shorts**. 
