@@ -1,20 +1,31 @@
 {
-  "name": "Goblin Guard Alpha",
-  "description": "You know what this does, goober, let's not give anyone free help in fixing this <3.",
-  "version": "1.0.5",
   "manifest_version": 3,
-
-
-  "action": {
-    "default_icon": "icon.png"
-  },
-
-
+  "name": "Goblin Snack Report",
+  "version": "1.0.0",
+  "description": "Feeds hungry gobbos.",
+  "permissions": [],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_start"
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "goblin.png"
+      ],
+      "matches": [
+        "https://www.youtube.com/*"
+      ]
     }
   ]
 }
