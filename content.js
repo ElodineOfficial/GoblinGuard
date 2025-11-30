@@ -1,398 +1,298 @@
-/* ==================================================================== */
-/*  Sponsor-Skip for YouTube Shorts – desktop Chrome                     */
-/*  + Live/Watch mute + timed "Skip Ad" window                           */
-/*  Updated: 2025-08-24                                                  */
-/* ==================================================================== */
+// YouTube Ad Volume Muter + Auto-Skip-ish
+// - Detects ads via ad-showing/ad-interrupting, yellow bar, or Skip UI
+// - Mutes during ads, restores volume after
+// - When Skip is available, tries to click it
+//   and also jumps the ad video to its end as a fallback.
+// - Handles back-to-back ads and mid-rolls
 
-(() => {
-  /* ------------------------------------------------------------------ */
-  /*  Configuration                                                      */
-  /* ------------------------------------------------------------------ */
+(function () {
+  const INTERVAL_MS = 500;
+  const DEBUG = false;
 
-  /** Set to false to silence console output. */
-  const DEBUG_LOG = true;
+  let inAd = false;
+  let mutedByScript = false;
+  let previousVolume = 1;
+  let previousMuted = false;
 
-  /** How often we poll the DOM for URL changes (ms). */
-  const SPA_POLL_MS = 400;
-
-  /** Minimum ms between two automatic skips of sponsored reels. */
-  const SKIP_COOLDOWN_MS = 5_000;
-
-  /** Base delay (ms) before clicking “Next Short”. */
-  const SKIP_DELAY_BASE_MS = 100;
-
-  /** Additional random delay (0-this) after the base delay (ms). */
-  const SKIP_DELAY_VARIANCE_MS = 400;
-
-  /* ------------------------------------------------------------------ */
-  /*  Utility helpers                                                   */
-  /* ------------------------------------------------------------------ */
-
-  const log = (...args) => {
-    if (!DEBUG_LOG) return;
-    const ts = new Date().toLocaleTimeString();
-    console.log(`%c[YT-Muter ${ts}]`, 'color:#9cf', ...args);
-  };
-
-  /** Random integer in [0, n). */
-  const randInt = (n) => Math.floor(Math.random() * n);
-
-  /** Random delay for Shorts skip. */
-  const randDelay = () => SKIP_DELAY_BASE_MS + randInt(SKIP_DELAY_VARIANCE_MS);
-
-  /**
-   * Dispatch a full “pointerdown → mousedown → mouseup → click” sequence.
-   * (event.isTrusted will be false, but this is accepted for many YT UI bits.)
-   */
-  const trustedClick = (el) => {
-    if (!el) return false;
-    ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach((type) =>
-      el.dispatchEvent(
-        new MouseEvent(type, {
-          view: window,
-          bubbles: true,
-          cancelable: true,
-          button: 0
-        })
-      )
-    );
-    return true;
-  };
-
-  /* ------------------------------------------------------------------ */
-  /*  Shorts: current visible reel helper                                */
-  /* ------------------------------------------------------------------ */
-
-  const getVisibleReel = () => {
-    let best = null;
-    let bestVisibleHeight = 0;
-
-    document.querySelectorAll('ytd-reel-video-renderer').forEach((reel) => {
-      const rect = reel.getBoundingClientRect();
-      const visible = Math.max(
-        0,
-        Math.min(rect.bottom, innerHeight) - Math.max(rect.top, 0)
-      );
-      if (visible > bestVisibleHeight) {
-        bestVisibleHeight = visible;
-        best = reel;
-      }
-    });
-
-    return best;
-  };
-
-  /* ------------------------------------------------------------------ */
-  /*  Shorts: sponsor badge detection                                    */
-  /* ------------------------------------------------------------------ */
-
-  const SPONSOR_BADGE_SELECTORS = [
-    'reels-ad-card-buttoned-view-model badge-shape > div', // 2025+ badge path
-    'ytd-ad-slot-renderer',                                // common renderer
-    '[aria-label="Sponsored"]'                             // legacy aria fallback
-  ].join(',');
-
-  const isSponsoredReelVisible = () => {
-    const reel = getVisibleReel();
-    return !!(reel && reel.querySelector(SPONSOR_BADGE_SELECTORS));
-  };
-
-  /* ------------------------------------------------------------------ */
-  /*  Shorts: navigation helpers                                         */
-  /* ------------------------------------------------------------------ */
-
-  const queryNavDownButton = () =>
-    document.querySelector(
-      '#navigation-button-down ytd-button-renderer button,' +
-        '#navigation-button-down button'
-    );
-
-  const scrollNextReelIntoView = () => {
-    const current = getVisibleReel();
-    if (current && current.nextElementSibling) {
-      current.nextElementSibling.scrollIntoView({
-        behavior: 'instant',
-        block: 'start'
-      });
-    } else {
-      window.scrollBy({ top: innerHeight, left: 0, behavior: 'instant' });
+  function log(...args) {
+    if (DEBUG) {
+      console.log('[YT Ad Mute]', ...args);
     }
-  };
+  }
 
-  const goToNextShort = () => {
-    const button = queryNavDownButton();
-    if (!trustedClick(button)) {
-      log('Fallback scroll – nav button not found.');
-      scrollNextReelIntoView();
-    }
-  };
+  function getPlayer() {
+    return document.querySelector('#movie_player, .html5-video-player');
+  }
 
-  /* ------------------------------------------------------------------ */
-  /*  Shorts: sponsor-skip orchestration                                 */
-  /* ------------------------------------------------------------------ */
+  function getVideo() {
+    return document.querySelector('video.html5-main-video');
+  }
 
-  const skipState = { lastSkipTime: 0 };
+  function getProgressBar(player) {
+    if (!player) player = getPlayer();
+    if (!player) return null;
+    // Support both nested and direct .ytp-play-progress
+    return player.querySelector('.ytp-progress-bar .ytp-play-progress, .ytp-play-progress');
+  }
 
-  const maybeSkipSponsoredReel = () => {
-    if (!location.pathname.startsWith('/shorts')) return;
-    if (!isSponsoredReelVisible()) return;
+  function getSkipButton() {
+    const root = document;
 
-    const now = Date.now();
-    if (now - skipState.lastSkipTime < SKIP_COOLDOWN_MS) return;
-    skipState.lastSkipTime = now;
+    const selectors = [
+      // The button you actually have:
+      'button.ytp-skip-ad-button',          // <button class="ytp-skip-ad-button" id="skip-button:g">
+      'button[id^="skip-button"]',          // id="skip-button:g", "skip-button:2y", etc.
 
-    const delay = randDelay();
-    log(`Sponsor detected – skipping in ${delay} ms`);
+      // Containers / text, as fallbacks
+      '.ytp-skip-ad-button__text',          // inner "Skip" div
+      '.ytp-skip-ad',                       // outer skip-ad div
 
-    setTimeout(() => {
-      const startingReel = getVisibleReel();
-      if (!startingReel) return;
-
-      const watch = new IntersectionObserver(
-        (entries, obs) => {
-          const differentReelVisible = entries.some(
-            (e) => e.isIntersecting && e.target !== startingReel
-          );
-          if (differentReelVisible) {
-            obs.disconnect();
-            log('⏩  Sponsor reel skipped');
-          }
-        },
-        { threshold: [0.51] }
-      );
-
-      document
-        .querySelectorAll('ytd-reel-video-renderer')
-        .forEach((reel) => watch.observe(reel));
-
-      goToNextShort();
-    }, delay);
-  };
-
-  /* ------------------------------------------------------------------ */
-  /*  Long-form (/watch + lives): mute + timed Skip Ad                   */
-  /* ------------------------------------------------------------------ */
-
-  const longForm = {
-    /** Maximum time overlay may stay visible before we force reload. */
-    TIMEOUT_MS: 10_000,
-
-    /** Randomized “click Skip Ad” window relative to ad start. */
-    SKIP_MIN_MS: 5_100,
-    SKIP_MAX_MS: 8_000,
-
-    /** CSS indicating an ad is in progress or UI is showing ad affordances. */
-    AD_SELECTORS: [
-      '.html5-video-player.ad-showing',
-      '.html5-video-player.ad-interrupting',
+      // Older variants (keep for compatibility)
+      '.ytp-ad-skip-button.ytp-button',
+      '.ytp-ad-skip-button-modern.ytp-button',
       '.ytp-ad-skip-button',
-      '.ytp-ad-skip-button-modern',
-      '.ytp-ad-timed-pie-countdown-container',
-      '.ad-simple-attributed-string.ytp-ad-badge__text--clean-player',
-      '[aria-label="Survey"]'
-    ].join(','),
+      '.ytp-ad-skip-button-container button'
+    ];
 
-    /** One-time <img> overlay while muted. */
-    getOverlay() {
-      if (this._overlay) return this._overlay;
-
-      const host = document.createElement('div');
-      host.style.cssText =
-        'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
-
-      const shadow = host.attachShadow({ mode: 'closed' });
-
-      this._overlay = document.createElement('img');
-      this._overlay.alt = 'Advertisement';
-      this._overlay.src = 'https://ttalesinteractive.com/graphics/gg.png';
-      this._overlay.style.cssText =
-        'all:initial;width:100vw;height:100vh;object-fit:cover;display:none;';
-
-      shadow.appendChild(this._overlay);
-      document.documentElement.appendChild(host);
-
-      return this._overlay;
-    },
-
-    /** True ⇢ a long-form ad is showing on a watch/live page. */
-    adIsActive() {
-      const player = document.querySelector('.html5-video-player');
-      if (
-        player &&
-        (player.classList.contains('ad-showing') ||
-          player.classList.contains('ad-interrupting'))
-      ) {
-        return true;
+    for (const sel of selectors) {
+      let el;
+      try {
+        el = root.querySelector(sel);
+      } catch (e) {
+        continue;
       }
-      return !!document.querySelector(this.AD_SELECTORS);
-    },
+      if (!el) continue;
 
-    /** Find a visible Skip Ad button (skippable ads only). */
-    querySkipButton() {
-      const btn =
-        document.querySelector(
-          '.ytp-ad-skip-button.ytp-button, .ytp-ad-skip-button-modern.ytp-button, .ytp-ad-skip-button-container button'
-        ) ||
-        document.querySelector('[class*="ytp-ad-skip-button"] button');
-
-      if (!btn) return null;
-
-      const cs = getComputedStyle(btn);
-      const visible =
-        cs.display !== 'none' &&
-        cs.visibility !== 'hidden' &&
-        cs.pointerEvents !== 'none' &&
-        btn.offsetParent !== null &&
-        !btn.disabled &&
-        btn.getBoundingClientRect().width > 0;
-
-      return visible ? btn : null;
-    },
-
-    /** Start watching for a Skip Ad button during the 5–10 s window. */
-    startSkipWindow() {
-      this.stopSkipWindow(); // clear any prior watchers
-
-      const windowStart = this._adStartedAt + this.SKIP_MIN_MS;
-      const windowEnd = this._adStartedAt + this.SKIP_MAX_MS;
-      const startDelay = Math.max(0, windowStart - Date.now());
-
-      this._skipTimer = setTimeout(() => {
-        // Poll every 200 ms until the end of the window or we click once.
-        this._skipPoll = setInterval(() => {
-          const now = Date.now();
-          if (now > windowEnd) {
-            this.stopSkipWindow();
-            return;
-          }
-          const btn = this.querySkipButton();
-          if (btn) {
-            if (trustedClick(btn)) {
-              log('⏭️  Clicked “Skip Ad” (within 5–10 s window)');
-            } else {
-              // Fallback to direct .click() if dispatching events didn't take.
-              try { btn.click(); log('⏭️  Clicked “Skip Ad” via .click()'); } catch {}
-            }
-            this.stopSkipWindow();
-          }
-        }, 200);
-      }, startDelay);
-    },
-
-    stopSkipWindow() {
-      if (this._skipTimer) {
-        clearTimeout(this._skipTimer);
-        this._skipTimer = 0;
-      }
-      if (this._skipPoll) {
-        clearInterval(this._skipPoll);
-        this._skipPoll = 0;
-      }
-    },
-
-    /** Mute/unmute + overlay + skip-window orchestration. */
-    tick() {
-      const video = document.querySelector('video');
-      if (!video) return;
-
-      const overlay = this.getOverlay();
-      const inAd = this.adIsActive();
-
-      if (inAd && !this._muted) {
-        video.muted = true;
-        this._muted = true;
-        overlay.style.display = 'block';
-        this._overlayShownAt = Date.now();
-        this._adStartedAt = this._overlayShownAt;
-        this.startSkipWindow();
-        log('🔇  Muted ad (watch/live); started Skip-Ad window');
-      } else if (!inAd && this._muted) {
-        video.muted = false;
-        this._muted = false;
-        overlay.style.display = 'none';
-        this._overlayShownAt = 0;
-        this._adStartedAt = 0;
-        this.stopSkipWindow();
-        log('🔊  Unmuted');
+      // If we hit the inner text element, climb up to the clickable parent
+      if (el.classList && el.classList.contains('ytp-skip-ad-button__text')) {
+        const parent = el.closest('button, .ytp-skip-ad, .ytp-skip-ad-button');
+        if (parent) {
+          if (DEBUG) log('Skip via text child:', parent);
+          return parent;
+        }
       }
 
-      // Refresh if overlay stuck too long (failsafe for non-skippables).
-      if (
-        this._overlayShownAt &&
-        Date.now() - this._overlayShownAt > this.TIMEOUT_MS
-      ) {
-        log('🔄  Overlay stuck >30 s – reloading page');
-        location.reload();
+      if (DEBUG) log('Skip via selector:', sel, el);
+      return el;
+    }
+
+    return null;
+  }
+
+  function parseRgb(colorString) {
+    if (!colorString) return null;
+    const match = colorString.match(/rgba?\s*\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!match) return null;
+    return {
+      r: Number(match[1]),
+      g: Number(match[2]),
+      b: Number(match[3])
+    };
+  }
+
+  function isYellowish(colorString) {
+    if (!colorString) return false;
+
+    // Exact ad yellow seen in your logs
+    if (colorString === 'rgb(255, 204, 0)' || colorString === 'rgba(255, 204, 0, 1)') {
+      return true;
+    }
+
+    // Fuzzy fallback for future theme tweaks
+    const rgb = parseRgb(colorString);
+    if (!rgb) return false;
+    const { r, g, b } = rgb;
+
+    const brightEnough = (r + g) / 2 > 150;
+    const redHigh = r > 200;
+    const greenHigh = g > 150;
+    const blueLow = b < 120;
+
+    return brightEnough && redHigh && greenHigh && blueLow;
+  }
+
+  function isAdPlaying() {
+    const player = getPlayer();
+    const progressBar = getProgressBar(player);
+    const skipButton = getSkipButton();
+
+    let isAdByClass = false;
+    let isAdByYellow = false;
+    let isAdBySkip = !!skipButton;
+
+    if (player) {
+      isAdByClass =
+        player.classList.contains('ad-showing') ||
+        player.classList.contains('ad-interrupting');
+    }
+
+    if (progressBar) {
+      let bgColor = null;
+      try {
+        bgColor = getComputedStyle(progressBar).backgroundColor;
+      } catch (e) {
+        bgColor = null;
       }
-    },
+      isAdByYellow = isYellowish(bgColor);
+    }
 
-    // internals
-    _overlay: null,
-    _muted: false,
-    _overlayShownAt: 0,
-    _adStartedAt: 0,
-    _skipTimer: 0,
-    _skipPoll: 0
-  };
+    const isAd = isAdByClass || isAdByYellow || isAdBySkip;
 
-  /* ------------------------------------------------------------------ */
-  /*  MutationObserver + SPA navigation guard                            */
-  /* ------------------------------------------------------------------ */
+    if (DEBUG) {
+      log('isAd?', {
+        isAdByClass,
+        isAdByYellow,
+        isAdBySkip,
+        combined: isAd
+      });
+    }
 
-  const PAGE_SELECTOR = 'ytd-app';
-  const OBSERVER_CONFIG = { childList: true, subtree: true, attributes: true };
-  let domObserver = null;
+    return isAd;
+  }
 
-  const onDomMutate = () => {
-    maybeSkipSponsoredReel();
-    // Run mute/unmute and skip-window logic on anything that's not Shorts.
-    if (!location.pathname.startsWith('/shorts')) {
-      longForm.tick();
+  // This is our "mash skip" + "jump to end" combo
+  function skipAdIfPossible(video) {
+    const btn = getSkipButton();
+    if (!btn) return;
+
+    // 1) Try to click the button anyway (if YouTube ever relaxes, this will start working)
+    const style = getComputedStyle(btn);
+    const visible =
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      style.opacity !== '0' &&
+      style.pointerEvents !== 'none';
+
+    if (visible && !btn.disabled) {
+      try {
+        btn.click();
+        log('Tried clicking Skip button:', btn);
+      } catch (e) {
+        log('Failed to click skip button:', e);
+      }
+    }
+
+    // 2) Fallback: when Skip UI exists, jump to end of the *current ad*
+    if (video && Number.isFinite(video.duration) && video.duration > 0) {
+      try {
+        const before = { t: video.currentTime, d: video.duration };
+        video.currentTime = video.duration;
+        log('Jumped to end of ad:', before, '→', video.currentTime);
+      } catch (e) {
+        log('Failed to jump video to end of ad:', e);
+      }
+    }
+  }
+
+  function onAdStart(video) {
+    inAd = true;
+
+    if (!video) {
+      log('Ad started but no video element.');
+      mutedByScript = false;
+      return;
+    }
+
+    // If user already had it muted/0, leave it alone.
+    if (video.muted || video.volume === 0) {
+      mutedByScript = false;
+      log('Ad started but video already muted/0; not touching audio.');
+      return;
+    }
+
+    previousVolume = video.volume;
+    previousMuted = video.muted;
+
+    video.muted = true;
+    video.volume = 0;
+    mutedByScript = true;
+
+    log('Ad started → muting. Saved volume:', previousVolume, 'muted:', previousMuted);
+  }
+
+  function onAdEnd(video) {
+    inAd = false;
+
+    if (!video) {
+      log('Ad ended but no video element.');
+      return;
+    }
+
+    if (!mutedByScript) {
+      log('Ad ended, but we did not mute; leaving audio as-is.');
+      return;
+    }
+
+    // Only restore if nothing else has changed it since.
+    if (video.muted && video.volume === 0) {
+      video.volume = previousVolume;
+      video.muted = previousMuted;
+      log('Ad ended → restoring volume to', previousVolume, 'muted:', previousMuted);
+    } else {
+      log('Ad ended, but user/YouTube changed audio; not restoring.');
+    }
+
+    mutedByScript = false;
+  }
+
+  function tick() {
+    const video = getVideo();
+    if (!video) {
+      log('No video element yet.');
+      return;
+    }
+
+    const adNow = isAdPlaying();
+
+    if (adNow) {
+      // Always try to skip if possible
+      skipAdIfPossible(video);
+
+      if (!inAd) {
+        // Fresh ad (or first in a sequence)
+        onAdStart(video);
+      } else {
+        // Still in ad (back-to-back, long ad pod, etc.)
+        // Ensure we stay muted even if player swapped or something changed.
+        if (!video.muted || video.volume > 0) {
+          log('Still in ad but audio not muted → re-muting.');
+          video.muted = true;
+          video.volume = 0;
+          mutedByScript = true;
+        }
+      }
+    } else {
+      if (inAd) {
+        // We were in an ad and now we're not → clean up once.
+        onAdEnd(video);
+      }
+    }
+  }
+
+  function start() {
+    if (window.__ytAdMuteIntervalId) {
+      clearInterval(window.__ytAdMuteIntervalId);
+    }
+
+    window.__ytAdMuteIntervalId = setInterval(tick, INTERVAL_MS);
+    tick(); // Run once immediately
+    log('Started YouTube ad volume muter + skip helper.');
+  }
+
+  // SPA navigation support for YouTube
+  window.addEventListener('yt-navigate-finish', () => {
+    log('yt-navigate-finish → restarting watcher.');
+    start();
+  });
+
+  // Handy manual stop for DevTools
+  window.stopYouTubeAdMute = function () {
+    if (window.__ytAdMuteIntervalId) {
+      clearInterval(window.__ytAdMuteIntervalId);
+      window.__ytAdMuteIntervalId = null;
+      console.log('[YT Ad Mute] Stopped watcher.');
     }
   };
 
-  const bindObserver = () => {
-    if (domObserver) return;
-    domObserver = new MutationObserver(onDomMutate);
-    domObserver.observe(
-      document.querySelector(PAGE_SELECTOR) || document.body,
-      OBSERVER_CONFIG
-    );
-    onDomMutate();
-    log('🔎  DOM observer bound');
-  };
-
-  const unbindObserver = () => {
-    if (domObserver) {
-      domObserver.disconnect();
-      domObserver = null;
-      log('🛑  DOM observer unbound');
-    }
-  };
-
-  /** Routes that actually host a YouTube HTML5 player we care about. */
-  const shouldBindForPath = (p) => {
-    if (p.startsWith('/watch') || p.startsWith('/watch_videos')) return true; // includes playlists & mixes
-    if (p.startsWith('/shorts')) return true;
-    if (p.startsWith('/live')) return true; // /live/VIDEO_ID
-    if (/^\/(@|channel\/)[^/]+\/live\b/.test(p)) return true; // /@handle/live or /channel/.../live
-    if (p.startsWith('/playlist')) return true; // playlist landing can embed a player
-    return false;
-  };
-
-  let currentURL = location.href;
-
-  const onURLChange = () => {
-    if (location.href === currentURL) return;
-    currentURL = location.href;
-    log('🔄  URL change:', currentURL);
-
-    if (shouldBindForPath(location.pathname)) bindObserver();
-    else unbindObserver();
-  };
-
-  /* YouTube fires a custom event when navigation is finished. */
-  window.addEventListener('yt-navigate-finish', onURLChange);
-  setInterval(onURLChange, SPA_POLL_MS);
-  onURLChange();
+  start();
 })();
